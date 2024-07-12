@@ -1,0 +1,143 @@
+class Box{
+  String name;
+  int pos_x;
+  int pos_y;
+  int w;
+  int h;
+  // Hacer: variable de salida del sistema de tipo double y que se envie cuando clickes fuera del rectangulo
+  boolean showLine=false;
+  int temp=1000;//(1s) variable que hace el parpadeo cada 0.5 s
+  long t_act; // Preguntar si se puede mejorar la animacion
+  long t_old;
+  
+  int letter_size=20;
+  int pos_letter_size=letter_size/2;
+  
+  String inputText="";
+  String inputText_aux="";
+                                                           
+  Box(String nom,int x,int y, int width_box, int height_box,String inic_val){
+    name=nom;
+    pos_x=x;
+    pos_y=y;
+    w=width_box;
+    h=height_box;
+   inputText =inic_val;
+   inputText_aux=inputText;
+   
+  }
+  void draw_box(boolean estate){
+    fill(estate ? 200 : 255);
+    rectang(pos_x,pos_y,w,h);
+    draw_blink(showLine);
+    draw_inputText();
+   }
+   
+   
+  void rectang(int x0,int y0,int w0,int h0){
+    noStroke();
+    rect(x0,y0,w0,h0);
+    
+    textAlign(CENTER,CENTER);
+    textSize(letter_size);
+    fill(#0FF026);
+    text(name, (pos_x+w/2),pos_y-pos_letter_size);
+    
+  }
+  void draw_blink(boolean blink){//Animacion de la linea parpadeando
+    if (blink==true){
+      stroke(0);
+      if(t_act-t_old<=(temp/2)){
+        line(pos_x+w/2+inputText.length()*5,pos_y,pos_x+w/2+inputText.length()*5,pos_y+h);// Posicion de la linea detras del ultimo caracater que hayamos introducido en el cuadro
+      }
+      if(t_act-t_old>=temp){
+        t_old=t_act;
+      }
+      t_act=millis();
+    }
+    
+  }
+  
+   void blink_line(int x, int y) {// verifica hemos clickado dentro de la caja
+    if(x >= pos_x && x <= pos_x + w && y >= pos_y && y <= pos_y + h){
+      showLine=true;
+      t_act=millis();
+      t_old=millis();
+      
+    }else{
+      showLine=false;
+      if(inputText!=inputText_aux){//Cuando se clicka fuera y el valor es distinto, ejecutamos todo
+        if(inputText.length()==0){// en el caso de que borremos el valor lo dejamos por defecto a 0 para que no de problemas
+          inputText="0";
+        }
+        inputText_aux=inputText;
+        int[] result=processNumber(inputText_aux);//Convertimos los datos a lo que podemos enviar por el Modbus
+         synchronized(lock2){//Sincronizacion entre el hilo que se encarga del modbus y el otro, envamos un dato cada vez que se modifica y se clikca fuera
+           
+           ide=result[0];
+           write_values[0]=result[1];
+           write_values[1]=result[2];//Asignamos los valores al vector encargado de modificar lso registros
+           flag_send=true;
+         }                 
+      }
+      
+    }
+    
+  }
+ 
+  int [] processNumber(String input){//Procesamos los valores escritos por el uusario y los adaptamos a un formato que se puede enviar por modbus
+    int factor=1;//Iniciamos el factor a 1
+    float number= Float.parseFloat(input);
+    while(number !=Math.floor(number)){//Math.floor(number) se usa para verificar si el numero es entero
+      number=number*10;
+      factor=factor*10;
+    }
+    //A partir de aqui el numero es entero si o si y tiene un factor que nos indica los decimales
+    int final_number=(int) number;
+    int[] result1= new int[3];
+    if(name=="Kp"){
+      result1[0]=0;//Codificacion para indicar en que registros escirbir o no      
+    }else{
+      if(name=="Ki"){
+        result1[0]=1;
+      }else{
+        result1[0]=2;// Para Kd es 2
+      }
+    }
+    result1[1]= final_number;
+    result1[2]= factor;
+    return result1;    
+  }  
+  
+  boolean write(){// pregunat si esto se puede mejorar es para poder escribir en la caja en funcion de si hemos clickado
+  if (showLine==true){// se encarga de gfestionar la escritura en las cuadros
+    return true;
+  }else{
+  
+    return false;
+  }
+  }
+  
+   void input_text(char key1, int keyCode1){
+    // Si se presiona la tecla BACKSPACE, borra el último carácter del texto escrito
+    if (keyCode1 == BACKSPACE && inputText.length() > 0) {
+      inputText = inputText.substring(0, inputText.length() - 1);
+    }else{// Si se presiona cualquier otra tecla, agrega el carácter al texto 
+      // la coma la convertimos a un punto pq es lo que admite el esp32
+      if(key1== ','){
+        key1= '.';
+      }// comprobamos que sea un numero
+      // Si la tecla es un dígito, o un punto y el texto actual no contiene más de un punto
+      if ((Character.isDigit(key1) || (key1 == '.' && !inputText.contains(".")))&& inputText.length() <6) {
+        inputText = inputText + key1;
+      }
+    }    
+  }
+  void draw_inputText(){
+    textAlign(CENTER,pos_y+h/2);
+    textSize(letter_size);
+    fill(0);
+    text(inputText, (pos_x+w/2),pos_y+letter_size);
+  }
+
+}
