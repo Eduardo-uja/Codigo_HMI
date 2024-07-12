@@ -1,0 +1,189 @@
+//Interfaz TFG V1
+
+import de.re.easymodbus.modbusclient.*;
+
+private final Object lock1 = new Object();// Asi se crea lock1 que nos ayuda a la sincornizacionde multiples hilos
+private final Object lock2 = new Object();
+//[]HACER poner una escala en el grafico
+ModbusClient Client;//objeto libreria modbus
+Box acc_kp;
+Box acc_ki;
+Box acc_kd;
+Graf graf;
+int x_s=100;
+int y_s=100;
+int w_s=50;
+int h_s=50;
+int pos_x_graf=0;
+int pos_y_graf=500;
+boolean flag_mode=false;
+boolean flag_mode_aux=false;
+long timer=0;
+long timer_aux=0;
+
+//Var para la sincronozacion de enviar los datos
+boolean flag_send=false;
+int ide;//Nos indica en qu registros escribir
+int[] write_values= new int[2];//Vecor aux para poder escribir en varios registros a la vez y no tener retardo en los valores
+
+
+void setup(){
+  size(1200,1000);
+ 
+  acc_kp= new Box("Kp",30,40,90,30,"0.0");//text,Pos x,pos y, w,h, val inicial en string
+  acc_ki= new Box("Ki",200,40,90,30,"0.0");
+  acc_kd= new Box("Kd",370,40,90,30,"0.0");
+  graf= new Graf(pos_x_graf,pos_y_graf,width-pos_x_graf,height-pos_y_graf);
+  // Cambiar la ip en funcion de la wifi
+  //Ip lb 192.168.0.175
+  Client = new ModbusClient("192.168.0.101",502);
+  
+  thread("Modbus");// Asignamos la tarea "Modbus" a un nuevo hilo de ejecución
+}
+void draw(){
+  background(100); 
+  acc_kp.draw_box(flag_mode);
+  acc_ki.draw_box(flag_mode);
+  acc_kd.draw_box(flag_mode);
+  graf.draw_graf();
+  graf.mouse_on(mouseX,mouseY);
+  rectang_mode();
+  
+}
+
+void mousePressed(){
+//añadir las posibles interacciones del raton con las ditintas cosas
+  
+  mode(mouseX,mouseY);
+  if(flag_mode==false){
+    reset_graf(mouseX,mouseY);//Hablitamos al usuario a poder resetear la grafica unicamente si estamos en modo stop
+    acc_kp.blink_line(mouseX,mouseY);//Unicamnete se pueden modificar los parametros cuando estemos en modo STOP
+    acc_ki.blink_line(mouseX,mouseY);
+    acc_kd.blink_line(mouseX,mouseY); 
+}
+  
+  
+}
+void keyPressed(){
+  if (acc_kp.write()==true){
+    acc_kp.input_text(key, keyCode);//Pasamos key y el keycode a la clase box
+  }else{
+    if (acc_ki.write()==true){
+      acc_ki.input_text(key, keyCode);//Pasamos key y el keycode a la clase box
+    }else{
+    if (acc_kd.write()==true){
+      acc_kd.input_text(key, keyCode);//Pasamos key y el keycode a la clase box
+    }
+    }
+  }
+  }
+  
+  void rectang_mode(){
+    noStroke();
+    if(flag_mode==true){
+      fill(#FA0F0F);
+    }else{
+      fill(#0FFA34);
+    }
+    rect(x_s,y_s,w_s,h_s);
+    textAlign(CENTER, CENTER);
+    textSize(20);
+    fill(0);
+    if (flag_mode == false) {
+        text("Start", x_s + w_s / 2, y_s + h_s / 2);//Aqui estamos en modo Stop
+        reset_box();//Dibujamos el reset_box
+    } else {
+        text("Stop", x_s + w_s / 2, y_s + h_s / 2);//Aqui estamos en mod start
+    }
+  }
+  void mode(int pos_s_x, int pos_s_y){//Comprobamos si ha clickado dentro para cambiar el modo de funcionamiento
+    if(pos_s_x >=x_s && pos_s_x <= x_s+w_s && pos_s_y >= y_s && pos_s_y <= y_s+h_s){
+      synchronized(lock1){//Usamos esto par proteger el acceso a la variable evitando errores de concurrencia desde multipples hilos
+        flag_mode=!flag_mode;
+      }
+      
+    }
+    
+  }
+  void reset_box(){//Dibujamos el reset box
+    stroke(0);
+    fill(255);
+    rect(width-150,pos_y_graf-50,width,40);
+    fill(#FA0351);
+    textAlign(CENTER, CENTER);
+    text("Reset grafica", width-150 + 150 / 2, pos_y_graf-50 + 40 / 2);
+    
+  }
+  
+  void reset_graf(int x_r,int y_r){//Funcion que se encarga de comprobar si has clickado en el resetbox
+    if(x_r >= width - 150 && x_r <= width && y_r >= pos_y_graf - 50 && y_r <= pos_y_graf){
+      
+      graf.reset(true);// Activamos la funcion que se encarga de resetear los vectores con los valores guardados
+    }else{
+      graf.reset(false);
+    }
+  }
+  
+  void Modbus(){//Aqui ejecutamos todo lo relacionado con el modbus
+   while(true){
+     try{
+       if(!Client.isConnected()){
+         Client.Connect();         
+       }
+       synchronized(lock1){//Usamos esto par proteger el acceso a la variable evitando errores de concurrencia desde multipples hilos
+        if(flag_mode_aux!=flag_mode){//Enviamos datos cada vez que sea distinto
+         flag_mode_aux=flag_mode;
+         //println(flag_mode);
+         Client.WriteSingleCoil(0,flag_mode); 
+         if(flag_mode==true){
+           timer_aux=millis();
+         }
+         
+       }
+       
+      }
+       if(flag_mode==true){
+          timer=millis();
+          if(timer-timer_aux>=10){//Cada 10 ms
+            timer_aux=timer;
+            float valor=0.0;//Las definimos como variables locales
+            int valor_aux=Client.ReadInputRegisters(0,1)[0];
+            valor=valor_aux/100.0;
+            graf.add_data(valor);
+            //println(valor);
+          }
+        }
+        synchronized(lock2){//Sincronizacion con la clase box,nos da la señal para escribir en los registros
+          if(flag_send==true){
+            println(ide);
+            if(ide==0){//Escribimos en los registros de kp
+              Client.WriteMultipleRegisters(0,write_values);
+            }else{
+              if(ide==1){//Escribimos en los registros de ki
+                Client.WriteMultipleRegisters(2,write_values);
+              }else{
+                if(ide==2){//Escribimos en los resgistros de kd
+                  Client.WriteMultipleRegisters(4,write_values);
+                }
+              }
+            }
+            println("ide"+ide+"number"+write_values[0]+"factor"+write_values[1]);
+            flag_send=false;
+            
+          }
+          
+        }
+            
+     }catch(Exception e){
+         println("Error en comunicacion Modbus"+ e.getMessage());
+         try{
+           Client.Disconnect();
+         }catch(Exception ex){
+           println("Error al desconectar: " + ex.getMessage());
+         }
+       }
+   
+   }
+    
+  }
+  
